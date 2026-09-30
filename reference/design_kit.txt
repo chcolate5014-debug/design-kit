@@ -1,0 +1,986 @@
+# -*- coding: utf-8 -*-
+# =====================================================================
+#  FAB DASHBOARD DESIGN KIT — 설치 스크립트
+#
+#  사용법
+#   1) 이 파일 이름을 design_kit.py 로 바꾼다
+#   2) 설치할 프로젝트 폴더에서:  python design_kit.py
+#      (기존 파일이 있으면 덮어쓰지 않고 건너뜀. 덮어쓰려면: python design_kit.py --force)
+#   3) 데모 확인:  python app_demo.py  →  http://<서버>:8050
+#
+#  별도로 넣어야 하는 파일 (웹에서 다운로드)
+#   - static/fonts/PretendardVariable.woff2   (Pretendard GitHub 릴리즈)
+#   - static/fonts/D2Coding.woff2             (없으면 생략 가능, Consolas로 대체됨)
+#   - static/js/chart.umd.min.js              (Chart.js v4. 이미 쓰는 파일이 있으면 base.html 경로만 수정)
+#     ※ Chart.js v2를 쓰고 있어도 chart-theme.js는 동작하지만, lot_status.html 예시의
+#       옵션 문법(indexAxis, cutout 등)은 v3 이상 기준임
+# =====================================================================
+import os, sys
+FORCE = "--force" in sys.argv
+FILES = {}
+
+FILES['AGENTS.md'] = r'''# UI 규칙 (모든 Flask 화면 공통)
+
+이 프로젝트의 화면은 `static/css/base.css` 디자인 키트로만 만든다.
+새 스타일을 발명하지 말고, 아래 부품을 조립한다. 참고 예시는 `templates/lot_status.html`.
+
+## 절대 규칙
+1. 새 페이지는 반드시 `{% extends "base.html" %}` 로 시작하고 `{% block content %}` 안에만 작성한다.
+2. `style="..."` 인라인 스타일 금지. 예외는 진행률 width 같은 데이터 값뿐이다.
+3. 색은 hex 코드를 직접 쓰지 않는다. 항상 CSS 변수(`var(--accent)`, `var(--st-warn)` 등)를 쓴다.
+4. 새 `<style>` 블록이나 새 CSS 파일을 만들지 않는다. 필요한 부품이 없으면 base.css 끝에 추가하고, 그 안에서도 토큰만 쓴다.
+5. Bootstrap, Tailwind 등 다른 CSS 프레임워크를 추가하지 않는다.
+6. 차트는 Chart.js만 쓰고, 색·폰트 옵션을 직접 지정하지 않는다 (`chart-theme.js`가 처리). 시리즈 색은 `chartColor(i)`, 상태 색은 `statusColor('warn')`.
+7. 폰트를 지정하지 않는다. LOT ID, Wafer ID, 장비 ID 같은 코드값에만 `class="mono"`.
+
+## 상태 색의 의미 (섞어 쓰지 않는다)
+| 키 | 의미 | 뱃지 클래스 |
+|---|---|---|
+| run  | 진행 중 | `badge badge-run` |
+| ok   | 정상/완료 | `badge badge-ok` |
+| warn | 지연/주의 | `badge badge-warn` |
+| hold | 홀드/이상 | `badge badge-hold` |
+| idle | 대기/기타 | `badge badge-idle` |
+
+상태 색은 상태를 표시할 때만 쓴다. 제목, 버튼, 장식에 쓰지 않는다.
+강조색(`--accent`)은 선택된 메뉴, 주요 버튼, 링크에만 쓴다.
+
+## 페이지 레이아웃 순서
+```
+page-head   (제목 + 한 줄 설명 | 우측 버튼)
+filterbar   (조회 조건, 우측에 초기화/조회)
+kpi-band    (핵심 숫자 3~6개, 하나의 띠)
+grid-main   (좌: 메인 테이블 panel | 우: stack 안에 차트 panel 1~2개)
+grid-2      (보조 차트/히트맵 2개)
+```
+
+## 부품 목록
+- 패널: `.panel > .panel-head(.panel-title, .panel-note) + .panel-body` (테이블은 `.panel-body.flush`)
+- 그리드: `.grid.grid-2`, `.grid.grid-3`, `.grid.grid-main`, 세로 쌓기 `.stack`
+- KPI: `.kpi-band > .kpi[data-status="warn"] > .kpi-label + .kpi-value(.kpi-unit) + .kpi-delta(.up/.down)`
+- 필터: `.filterbar > .field(label + .select/.input)` + `.filterbar-actions`
+- 버튼: `.btn`, `.btn.btn-primary`, `.btn.btn-ghost`, 작게 `.btn-sm`
+- 테이블: `.table-wrap > table.table` (숫자 열 `.num`, 정렬 가능 헤더 `th.sort` + `UI.sortable(table)`)
+- 진행률: `.progress > .progress-track > .progress-fill(.warn/.hold)` + `.progress-text`
+- 인라인 편집: `<span class="cell-edit" contenteditable="true" data-id=".." data-field="..">` + `UI.inlineEdit(document, saveFn)`
+- 차트 영역: `.chart-box > canvas` (높이 고정 컨테이너 필수, `.chart-box.tall` 은 320px)
+- 타임라인(간트): `UI.timeline(el, data)` / 히트맵: `UI.heatmap(el, data)`
+- 빈 상태: `.empty > strong + 설명` (무엇을 하면 되는지 적는다)
+- 알림: `UI.toast("저장됨")`
+
+## 문구
+- 버튼은 동작을 그대로: "조회", "저장", "엑셀 내보내기" (확인/Submit 금지)
+- 라벨은 짧게, 영문 대문자 라벨 금지
+- 에러는 무엇이 잘못됐고 어떻게 하면 되는지 적는다
+
+## Flask 쪽
+- 차트 데이터는 `render_template(..., page_data=dict)` 로 넘기고 템플릿에서 `const D = {{ page_data|tojson }};`
+- 현재 메뉴 강조는 `active_menu='lot'` 로 전달
+- 공통 값: `app_name`, `updated_at`
+'''
+
+FILES['app_demo.py'] = r'''"""
+디자인 키트 데모 앱 — 더미 데이터로 lot_status 화면을 띄워봄.
+실행:  python app_demo.py  →  http://<서버>:8050
+실제 앱에서는 build_lots() 부분만 DATALAKE 조회 결과로 바꾸면 됨.
+"""
+import random
+from datetime import datetime, timedelta
+from flask import Flask, render_template, request, jsonify
+
+app = Flask(__name__)
+
+STEPS = ["입고", "Bump", "Die Attach", "Underfill", "Mold", "Grind", "Test"]
+PRODUCTS = ["PKG-A12", "PKG-B08", "PKG-C16", "PKG-D04"]
+ST = {"run": "진행", "warn": "지연", "hold": "홀드", "ok": "완료"}
+MEMOS = ["", "", "", "장비 PM 대기", "재작업 검토", "", "샘플 추가 요청", "", "고객 확인 중", ""]
+
+
+def build_lots(n=24, seed=7):
+    rnd = random.Random(seed)
+    now = datetime(2026, 9, 28, 14, 0)
+    lots = []
+    for i in range(n):
+        st = rnd.choices(["run", "warn", "hold", "ok"], weights=[12, 4, 2, 5])[0]
+        step_i = len(STEPS) - 1 if st == "ok" else rnd.randint(0, len(STEPS) - 2)
+        days = rnd.randint(1, 14)
+        due = now + timedelta(days=rnd.randint(-3, 6) if st != "warn" else -rnd.randint(1, 4))
+        lots.append({
+            "lot_id": f"ER{26 if i % 3 else 25}{chr(65 + i % 6)}{3100 + i * 37:04d}",
+            "product": rnd.choice(PRODUCTS),
+            "step": STEPS[step_i],
+            "st": st, "status": ST[st],
+            "progress": 100 if st == "ok" else int((step_i + rnd.random()) / len(STEPS) * 100),
+            "days": days,
+            "due": due.strftime("%m/%d"),
+            "memo": rnd.choice(MEMOS),
+        })
+    order = {"hold": 0, "warn": 1, "run": 2, "ok": 3}
+    return sorted(lots, key=lambda x: (order[x["st"]], -x["days"]))
+
+
+def build_page_data(lots):
+    cnt = {k: sum(1 for l in lots if l["st"] == k) for k in ST}
+    wip = {k: [sum(1 for l in lots if l["step"] == s and l["st"] == k) for s in STEPS[:-1]] for k in ["run", "warn", "hold"]}
+
+    rnd = random.Random(3)
+    start = datetime(2026, 9, 23)
+    tl_lots = []
+    for l in lots[:8]:
+        t, segs = start + timedelta(hours=rnd.randint(0, 30)), []
+        cur = STEPS.index(l["step"])
+        for si, s in enumerate(STEPS):
+            dur = timedelta(hours=rnd.randint(14, 30))
+            if si < cur:
+                st = "ok"
+            elif si == cur:
+                st = l["st"] if l["st"] in ("warn", "hold") else ("ok" if l["st"] == "ok" else "run")
+                dur = max(dur, datetime(2026, 9, 28, 14) - t + timedelta(hours=6))
+            else:
+                st = "plan"
+            segs.append({"from": t.isoformat(), "to": (t + dur).isoformat(), "label": s, "st": st})
+            t += dur
+        tl_lots.append({"id": l["lot_id"], "segs": segs})
+
+    days = ["9/22", "9/23", "9/24", "9/25", "9/26", "9/27", "9/28"]
+    hm_vals = [[min(100, max(60, int(rnd.gauss(base, 6)))) for _ in days]
+               for base in [96, 90, 84, 92, 78, 88, 94]]
+
+    return {
+        "status": {"labels": [ST[k] for k in ["run", "warn", "hold", "ok"]],
+                   "keys": ["run", "warn", "hold", "ok"],
+                   "values": [cnt[k] for k in ["run", "warn", "hold", "ok"]]},
+        "wip": {"steps": STEPS[:-1], **wip},
+        "timeline": {"start": "2026-09-23", "days": 8, "now": "2026-09-28T14:00", "lots": tl_lots},
+        "heatmap": {"rows": STEPS, "cols": days, "values": hm_vals},
+        "trend": {"weeks": ["W31", "W32", "W33", "W34", "W35", "W36", "W37", "W38", "W39"],
+                  "rate": [78.2, 79.5, 81.0, 80.4, 82.9, 84.1, 83.6, 85.2, 86.4]},
+    }
+
+
+@app.route("/")
+def lot_status():
+    lots = build_lots()
+    cnt = {k: sum(1 for l in lots if l["st"] == k) for k in ST}
+    kpi = {"total": len(lots), "run": cnt["run"], "run_delta": 2, "warn": cnt["warn"],
+           "hold": cnt["hold"], "hold_days": 2.5, "done_today": cnt["ok"], "done_week": 31,
+           "auto_rate": 86.4, "auto_delta": 1.2}
+    filters = {"products": PRODUCTS, "steps": STEPS}
+    return render_template("lot_status.html", lots=lots, kpi=kpi, filters=filters,
+                           page_data=build_page_data(lots), active_menu="lot",
+                           updated_at="09/28 14:00", app_name="ER Monitor")
+
+
+@app.route("/api/memo", methods=["POST"], endpoint="save_memo")
+def save_memo():
+    body = request.get_json(force=True)
+    # TODO: 실제 저장 로직 (DB / 엑셀 / S3)
+    print("memo saved:", body)
+    return jsonify(ok=True)
+
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=8050, debug=True)
+'''
+
+FILES['templates/base.html'] = r'''<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Dashboard{% endblock %} · {{ app_name|default('ER Monitor') }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/base.css') }}">
+  {% block head %}{% endblock %}
+</head>
+<body>
+<div class="app">
+
+  <header class="topbar">
+    <div class="topbar-brand"><span class="topbar-mark"></span>{{ app_name|default('ER Monitor') }}</div>
+    <div class="topbar-spacer"></div>
+    <div class="topbar-meta">데이터 기준 <strong>{{ updated_at|default('-') }}</strong></div>
+    <div class="topbar-meta">{{ user_name|default('') }}</div>
+  </header>
+
+  <nav class="sidenav">
+    {# href="#" 는 url_for('엔드포인트명') 으로 교체. 현재 메뉴는 render_template(..., active_menu='lot') 로 전달 #}
+    {% set active = active_menu|default('') %}
+    <div class="nav-group">
+      <div class="nav-group-title">모니터링</div>
+      <a class="nav-link {{ 'is-active' if active=='lot' }}" href="#">Lot 현황</a>
+      <a class="nav-link {{ 'is-active' if active=='step' }}" href="#">Step 자동화율</a>
+      <a class="nav-link {{ 'is-active' if active=='timeline' }}" href="#">Lot 타임라인</a>
+    </div>
+    <div class="nav-group">
+      <div class="nav-group-title">관리</div>
+      <a class="nav-link {{ 'is-active' if active=='master' }}" href="#">제품 마스터</a>
+      <a class="nav-link {{ 'is-active' if active=='schedule' }}" href="#">일정 업로드</a>
+    </div>
+  </nav>
+
+  <main class="main">
+    {% block content %}{% endblock %}
+  </main>
+
+</div>
+
+<!-- Chart.js: 사내에 이미 있는 파일 경로로 교체 (없으면 static/js 에 chart.umd.min.js 넣기) -->
+<script src="{{ url_for('static', filename='js/chart.umd.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/chart-theme.js') }}"></script>
+<script src="{{ url_for('static', filename='js/ui.js') }}"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>
+'''
+
+FILES['templates/lot_status.html'] = r'''{% extends "base.html" %}
+{% block title %}Lot 현황{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1 class="page-title">Lot 현황</h1>
+    <div class="page-sub">엔지니어링 런 {{ kpi.total }}개 lot · 목표일 기준 지연 판정</div>
+  </div>
+  <div style="display:flex;gap:var(--s2)">
+    <button class="btn">엑셀 내보내기</button>
+    <button class="btn btn-primary" onclick="location.reload()">새로고침</button>
+  </div>
+</div>
+
+<form class="filterbar" method="get">
+  <div class="field"><label for="f-prod">제품</label>
+    <select id="f-prod" name="product" class="select">
+      <option value="">전체</option>
+      {% for p in filters.products %}<option {{ 'selected' if p==request.args.get('product') }}>{{ p }}</option>{% endfor %}
+    </select></div>
+  <div class="field"><label for="f-step">현재 Step</label>
+    <select id="f-step" name="step" class="select">
+      <option value="">전체</option>
+      {% for s in filters.steps %}<option>{{ s }}</option>{% endfor %}
+    </select></div>
+  <div class="field"><label for="f-st">상태</label>
+    <select id="f-st" name="status" class="select">
+      <option value="">전체</option><option>진행</option><option>지연</option><option>홀드</option><option>완료</option>
+    </select></div>
+  <div class="field"><label for="f-q">LOT ID</label>
+    <input id="f-q" name="q" class="input" placeholder="일부만 입력해도 검색" style="min-width:200px"></div>
+  <div class="filterbar-actions">
+    <a class="btn btn-ghost" href="?">초기화</a>
+    <button class="btn btn-primary" type="submit">조회</button>
+  </div>
+</form>
+
+<section class="kpi-band">
+  <div class="kpi" data-status="run">
+    <div class="kpi-label">진행 중</div>
+    <div class="kpi-value">{{ kpi.run }}<span class="kpi-unit">lot</span></div>
+    <div class="kpi-delta">전일 대비 {{ '%+d'|format(kpi.run_delta) }}</div>
+  </div>
+  <div class="kpi" data-status="warn">
+    <div class="kpi-label">지연</div>
+    <div class="kpi-value">{{ kpi.warn }}<span class="kpi-unit">lot</span></div>
+    <div class="kpi-delta">목표일 초과</div>
+  </div>
+  <div class="kpi" data-status="hold">
+    <div class="kpi-label">홀드</div>
+    <div class="kpi-value">{{ kpi.hold }}<span class="kpi-unit">lot</span></div>
+    <div class="kpi-delta">평균 {{ kpi.hold_days }}일 대기</div>
+  </div>
+  <div class="kpi" data-status="ok">
+    <div class="kpi-label">금일 완료</div>
+    <div class="kpi-value">{{ kpi.done_today }}<span class="kpi-unit">lot</span></div>
+    <div class="kpi-delta up">주간 누적 {{ kpi.done_week }}</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">Step 자동화율</div>
+    <div class="kpi-value">{{ kpi.auto_rate }}<span class="kpi-unit">%</span></div>
+    <div class="kpi-delta {{ 'up' if kpi.auto_delta >= 0 else 'down' }}">전주 대비 {{ '%+.1f'|format(kpi.auto_delta) }}%p</div>
+  </div>
+</section>
+
+<div class="grid grid-main">
+  <section class="panel">
+    <div class="panel-head">
+      <h2 class="panel-title">Lot 목록</h2>
+      <span class="panel-note">메모는 클릭해서 바로 수정 · Enter 저장 · Esc 취소</span>
+    </div>
+    <div class="panel-body flush">
+      <div class="table-wrap">
+        <table class="table" id="lot-table">
+          <thead><tr>
+            <th class="sort">LOT ID</th><th class="sort">제품</th><th class="sort">현재 Step</th>
+            <th class="sort">상태</th><th>진행률</th><th class="sort num">경과일</th>
+            <th class="sort">목표일</th><th>메모</th>
+          </tr></thead>
+          <tbody>
+          {% for l in lots %}
+            <tr>
+              <td class="mono">{{ l.lot_id }}</td>
+              <td>{{ l.product }}</td>
+              <td>{{ l.step }}</td>
+              <td><span class="badge badge-{{ l.st }}">{{ l.status }}</span></td>
+              <td><div class="progress">
+                <div class="progress-track"><div class="progress-fill {{ l.st if l.st in ['warn','hold'] }}" style="width:{{ l.progress }}%"></div></div>
+                <span class="progress-text">{{ l.progress }}%</span></div></td>
+              <td class="num">{{ l.days }}</td>
+              <td class="{{ 'muted' if l.st == 'ok' }}">{{ l.due }}</td>
+              <td><span class="cell-edit" contenteditable="true" data-id="{{ l.lot_id }}" data-field="memo">{{ l.memo }}</span></td>
+            </tr>
+          {% else %}
+            <tr><td colspan="8"><div class="empty"><strong>조건에 맞는 lot이 없습니다</strong>필터를 줄이거나 초기화해 보세요.</div></td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <div class="stack">
+    <section class="panel">
+      <div class="panel-head"><h2 class="panel-title">상태 분포</h2><span class="panel-note">{{ kpi.total }} lot</span></div>
+      <div class="panel-body"><div class="chart-box" style="height:200px"><canvas id="ch-status"></canvas></div></div>
+    </section>
+    <section class="panel">
+      <div class="panel-head"><h2 class="panel-title">Step별 재공</h2><span class="panel-note">지연·홀드 강조</span></div>
+      <div class="panel-body"><div class="chart-box"><canvas id="ch-wip"></canvas></div></div>
+    </section>
+  </div>
+</div>
+
+<section class="panel" style="margin-bottom:var(--s4)">
+  <div class="panel-head">
+    <h2 class="panel-title">Lot 타임라인</h2>
+    <div class="legend">
+      <span class="legend-item"><span class="legend-swatch" style="background:var(--st-ok)"></span>완료 Step</span>
+      <span class="legend-item"><span class="legend-swatch" style="background:var(--st-run)"></span>진행</span>
+      <span class="legend-item"><span class="legend-swatch" style="background:var(--st-warn)"></span>지연</span>
+      <span class="legend-item"><span class="legend-swatch" style="background:var(--st-hold)"></span>홀드</span>
+      <span class="legend-item"><span class="legend-swatch" style="border:1px dashed var(--line-strong)"></span>계획</span>
+    </div>
+  </div>
+  <div class="panel-body" style="padding-top:var(--s5)"><div id="tl"></div></div>
+</section>
+
+<div class="grid grid-2">
+  <section class="panel">
+    <div class="panel-head"><h2 class="panel-title">Step × 요일 자동화율</h2><span class="panel-note">최근 7일</span></div>
+    <div class="panel-body">
+      <div id="hm"></div>
+      <div class="hm-scale"><span>60%</span><span class="hm-scale-bar"></span><span>100%</span></div>
+    </div>
+  </section>
+  <section class="panel">
+    <div class="panel-head"><h2 class="panel-title">자동화율 추이</h2><span class="panel-note">주간 · 목표 90%</span></div>
+    <div class="panel-body"><div class="chart-box"><canvas id="ch-trend"></canvas></div></div>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const D = {{ page_data|tojson }};
+  const T = window.CHART_THEME;
+
+  // 상태 분포 (도넛)
+  new Chart(document.getElementById("ch-status"), {
+    type: "doughnut",
+    data: { labels: D.status.labels,
+            datasets: [{ data: D.status.values, backgroundColor: D.status.keys.map(statusColor) }] },
+    options: { cutout: "68%", plugins: { legend: { position: "right" } } }
+  });
+
+  // Step별 재공 (스택 막대: 정상 / 지연 / 홀드)
+  new Chart(document.getElementById("ch-wip"), {
+    type: "bar",
+    data: { labels: D.wip.steps, datasets: [
+      { label: "정상", data: D.wip.run,  backgroundColor: alpha(T.status.run, .85) },
+      { label: "지연", data: D.wip.warn, backgroundColor: T.status.warn },
+      { label: "홀드", data: D.wip.hold, backgroundColor: T.status.hold } ] },
+    options: { indexAxis: "y", scales: { x: { stacked: true, ticks: { precision: 0 } }, y: { stacked: true, grid: { display: false } } } }
+  });
+
+  // 자동화율 추이 (라인 + 목표선)
+  new Chart(document.getElementById("ch-trend"), {
+    type: "line",
+    data: { labels: D.trend.weeks, datasets: [
+      { label: "자동화율", data: D.trend.rate, borderColor: chartColor(0), backgroundColor: alpha(chartColor(0), .08), fill: true, pointRadius: 3 },
+      { label: "목표", data: D.trend.weeks.map(() => 90), borderColor: T.ink3, borderDash: [4, 4], borderWidth: 1, pointRadius: 0 } ] },
+    options: { scales: { y: { min: 70, max: 100, ticks: { callback: v => v + "%" } } },
+               plugins: { tooltip: { mode: "index", intersect: false } } }
+  });
+
+  UI.timeline(document.getElementById("tl"), D.timeline);
+  UI.heatmap(document.getElementById("hm"), Object.assign(D.heatmap, { min: 60, max: 100, fmt: v => v }));
+  UI.sortable(document.getElementById("lot-table"));
+
+  // 실제 저장: Flask 라우트로 POST
+  UI.inlineEdit(document, (id, field, value) =>
+    fetch("{{ url_for('save_memo') }}", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ lot_id: id, field: field, value: value }) })
+    .then(r => { if (!r.ok) throw new Error(); }));
+</script>
+{% endblock %}
+'''
+
+FILES['static/css/base.css'] = r'''/* ==========================================================================
+   FAB DASHBOARD DESIGN KIT — base.css
+   모든 Flask 대시보드 공통 스타일. 색/간격/폰트는 반드시 아래 토큰만 사용.
+   ========================================================================== */
+
+/* ---------- 1. Fonts (static/fonts 에 파일을 넣으면 자동 적용) ---------- */
+@font-face {
+  font-family: "Pretendard";
+  src: url("../fonts/PretendardVariable.woff2") format("woff2-variations");
+  font-weight: 100 900;
+  font-display: swap;
+}
+@font-face {
+  font-family: "D2Coding";
+  src: url("../fonts/D2Coding.woff2") format("woff2");
+  font-weight: 400;
+  font-display: swap;
+}
+
+/* ---------- 2. Tokens ---------- */
+:root {
+  /* surface */
+  --bg:            #EEF1F4;
+  --surface:       #FFFFFF;
+  --surface-2:     #F6F8FA;
+  --line:          #DFE4EA;
+  --line-strong:   #C5CDD6;
+
+  /* text */
+  --ink:           #16202B;
+  --ink-2:         #485463;
+  --ink-3:         #7B8695;
+
+  /* brand accent (petrol blue) — 강조/선택/링크에만 사용 */
+  --accent:        #0E6E8C;
+  --accent-hover:  #0B5A73;
+  --accent-weak:   #E2F0F4;
+
+  /* status — 상태 표시에만 사용, 장식 금지 */
+  --st-run:        #0E6E8C;  --st-run-bg:  #E2F0F4;   /* 진행 */
+  --st-ok:         #23855A;  --st-ok-bg:   #E3F3EA;   /* 정상/완료 */
+  --st-warn:       #B87400;  --st-warn-bg: #FAF0D9;   /* 지연/주의 */
+  --st-hold:       #C4372E;  --st-hold-bg: #FAE6E4;   /* 홀드/이상 */
+  --st-idle:       #6B7684;  --st-idle-bg: #ECEFF2;   /* 대기/기타 */
+
+  /* chart series (순서대로 사용) */
+  --c1: #0E6E8C; --c2: #7FB3C4; --c3: #D29A2E; --c4: #5C6B7D; --c5: #A8B4C0; --c6: #3C9D8F;
+
+  /* type */
+  --font:      "Pretendard", "Pretendard Variable", -apple-system, "Segoe UI", "Malgun Gothic", sans-serif;
+  --font-mono: "D2Coding", "JetBrains Mono", Consolas, "Courier New", monospace;
+  --fs-xs: 11px; --fs-sm: 12px; --fs-base: 13px; --fs-md: 14px;
+  --fs-lg: 16px; --fs-xl: 20px; --fs-kpi: 28px;
+
+  /* spacing (4px scale) */
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px;
+
+  /* shape */
+  --r-sm: 4px; --r: 6px;
+  --topbar-h: 48px; --nav-w: 208px;
+}
+
+/* ---------- 3. Reset & base ---------- */
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  font-family: var(--font);
+  font-size: var(--fs-base);
+  line-height: 1.5;
+  color: var(--ink);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "tnum" 1;          /* 숫자 폭 고정 */
+}
+h1, h2, h3, h4 { margin: 0; font-weight: 600; letter-spacing: -0.01em; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.mono { font-family: var(--font-mono); font-size: 0.95em; letter-spacing: 0; }
+.muted { color: var(--ink-3); }
+.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* ---------- 4. App shell ---------- */
+.app {
+  display: grid;
+  grid-template-columns: var(--nav-w) 1fr;
+  grid-template-rows: var(--topbar-h) 1fr;
+  grid-template-areas: "top top" "nav main";
+  min-height: 100vh;
+}
+.topbar {
+  grid-area: top;
+  display: flex; align-items: center; gap: var(--s4);
+  padding: 0 var(--s4);
+  background: var(--ink);
+  color: #E7ECF1;
+  position: sticky; top: 0; z-index: 20;
+}
+.topbar-brand { display: flex; align-items: center; gap: var(--s2); font-weight: 600; font-size: var(--fs-md); }
+.topbar-mark {
+  width: 20px; height: 20px; border-radius: 50%;
+  border: 2px solid #7FB3C4; position: relative;
+}
+.topbar-mark::after { /* 웨이퍼 노치 */
+  content: ""; position: absolute; left: 50%; bottom: -3px;
+  width: 6px; height: 4px; margin-left: -3px;
+  background: var(--ink); border-radius: 3px 3px 0 0;
+}
+.topbar-spacer { flex: 1; }
+.topbar-meta { font-size: var(--fs-sm); color: #9FAAB6; }
+.topbar-meta strong { color: #E7ECF1; font-weight: 500; }
+
+.sidenav {
+  grid-area: nav;
+  background: var(--surface);
+  border-right: 1px solid var(--line);
+  padding: var(--s4) var(--s2);
+  position: sticky; top: var(--topbar-h);
+  height: calc(100vh - var(--topbar-h)); overflow-y: auto;
+}
+.nav-group { margin-bottom: var(--s4); }
+.nav-group-title { font-size: var(--fs-xs); color: var(--ink-3); padding: 0 var(--s3) var(--s1); }
+.nav-link {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 7px var(--s3); border-radius: var(--r-sm);
+  color: var(--ink-2); font-size: var(--fs-base);
+}
+.nav-link:hover { background: var(--surface-2); color: var(--ink); text-decoration: none; }
+.nav-link.is-active { background: var(--accent-weak); color: var(--accent); font-weight: 600; }
+.nav-count { font-size: var(--fs-xs); color: var(--ink-3); }
+
+.main { grid-area: main; padding: var(--s5); min-width: 0; }
+
+/* ---------- 5. Page header & filter bar ---------- */
+.page-head {
+  display: flex; align-items: flex-end; justify-content: space-between;
+  gap: var(--s4); flex-wrap: wrap; margin-bottom: var(--s4);
+}
+.page-title { font-size: var(--fs-xl); }
+.page-sub { color: var(--ink-3); font-size: var(--fs-sm); margin-top: 2px; }
+
+.filterbar {
+  display: flex; align-items: flex-end; gap: var(--s3); flex-wrap: wrap;
+  padding: var(--s3) var(--s4);
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r);
+  margin-bottom: var(--s4);
+}
+.field { display: flex; flex-direction: column; gap: 3px; }
+.field label { font-size: var(--fs-xs); color: var(--ink-3); }
+.input, .select {
+  height: 32px; padding: 0 var(--s3);
+  font: inherit; color: var(--ink);
+  background: var(--surface); border: 1px solid var(--line-strong); border-radius: var(--r-sm);
+  min-width: 120px;
+}
+.input:focus, .select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-weak); }
+.filterbar-actions { margin-left: auto; display: flex; gap: var(--s2); }
+
+/* ---------- 6. Buttons ---------- */
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 32px; padding: 0 var(--s4);
+  font: inherit; font-weight: 500; cursor: pointer;
+  border-radius: var(--r-sm); border: 1px solid var(--line-strong);
+  background: var(--surface); color: var(--ink);
+}
+.btn:hover { background: var(--surface-2); }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn-primary:hover { background: var(--accent-hover); }
+.btn-ghost { border-color: transparent; background: transparent; color: var(--ink-2); }
+.btn-ghost:hover { background: var(--surface-2); }
+.btn-sm { height: 26px; padding: 0 var(--s3); font-size: var(--fs-sm); }
+
+/* ---------- 7. KPI band (카드 여러 개 대신 하나의 띠) ---------- */
+.kpi-band {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r);
+  margin-bottom: var(--s4); overflow: hidden;
+}
+.kpi { padding: var(--s4) var(--s5); border-left: 1px solid var(--line); position: relative; }
+.kpi:first-child { border-left: 0; }
+.kpi-label { font-size: var(--fs-sm); color: var(--ink-2); }
+.kpi-value { font-size: var(--fs-kpi); font-weight: 650; line-height: 1.2; margin-top: 2px; letter-spacing: -0.02em; }
+.kpi-unit { font-size: var(--fs-md); font-weight: 500; color: var(--ink-3); margin-left: 2px; }
+.kpi-delta { font-size: var(--fs-sm); color: var(--ink-3); margin-top: 2px; }
+.kpi-delta.up   { color: var(--st-ok); }
+.kpi-delta.down { color: var(--st-hold); }
+/* 상태 KPI: 좌측 컬러 바로만 표시 */
+.kpi[data-status]::before { content: ""; position: absolute; left: 0; top: var(--s4); bottom: var(--s4); width: 3px; border-radius: 0 2px 2px 0; }
+.kpi[data-status="warn"]::before { background: var(--st-warn); }
+.kpi[data-status="hold"]::before { background: var(--st-hold); }
+.kpi[data-status="ok"]::before   { background: var(--st-ok); }
+.kpi[data-status="run"]::before  { background: var(--st-run); }
+
+/* ---------- 8. Panels & grid ---------- */
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); min-width: 0; }
+.panel-head {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--s3);
+  padding: var(--s3) var(--s4); border-bottom: 1px solid var(--line);
+}
+.panel-title { font-size: var(--fs-md); font-weight: 600; }
+.panel-note { font-size: var(--fs-sm); color: var(--ink-3); }
+.panel-body { padding: var(--s4); }
+.panel-body.flush { padding: 0; }
+.chart-box { position: relative; height: 240px; }
+.chart-box.tall { height: 320px; }
+
+.grid { display: grid; gap: var(--s4); margin-bottom: var(--s4); }
+.grid-2   { grid-template-columns: 1fr 1fr; }
+.grid-3   { grid-template-columns: repeat(3, 1fr); }
+.grid-main { grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr); }
+.stack { display: flex; flex-direction: column; gap: var(--s4); min-width: 0; }
+@media (max-width: 1100px) { .grid-2, .grid-3, .grid-main { grid-template-columns: 1fr; } }
+@media (max-width: 800px) {
+  .app { grid-template-columns: 1fr; grid-template-areas: "top" "main"; }
+  .sidenav { display: none; }
+  .main { padding: var(--s4); }
+}
+
+/* ---------- 9. Table ---------- */
+.table-wrap { overflow: auto; max-height: 560px; }
+.table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: var(--fs-base); }
+.table th {
+  position: sticky; top: 0; z-index: 1;
+  background: var(--surface-2); color: var(--ink-2);
+  font-weight: 600; font-size: var(--fs-sm); text-align: left; white-space: nowrap;
+  padding: 8px var(--s3); border-bottom: 1px solid var(--line-strong);
+}
+.table td { padding: 7px var(--s3); border-bottom: 1px solid var(--line); white-space: nowrap; }
+.table tbody tr:hover td { background: #F3F7F9; }
+.table tbody tr.is-selected td { background: var(--accent-weak); }
+.table th.num, .table td.num { text-align: right; }
+.table-dense td { padding: 4px var(--s3); }
+.table .sort { cursor: pointer; user-select: none; }
+.table .sort::after { content: " ↕"; color: var(--ink-3); font-size: 10px; }
+
+/* 인라인 편집 셀 */
+.cell-edit { border-bottom: 1px dashed var(--line-strong); cursor: text; padding: 1px 2px; border-radius: 2px; }
+.cell-edit:hover { background: var(--accent-weak); }
+.cell-edit:focus { outline: none; background: #fff; box-shadow: 0 0 0 2px var(--accent); border-bottom-color: transparent; }
+.cell-edit:empty::before { content: "메모 추가"; color: var(--ink-3); opacity: .6; }
+.cell-edit:focus:empty::before { content: ""; }
+.cell-edit.is-saved { background: var(--st-ok-bg); transition: background 1.2s; }
+
+/* ---------- 10. Badges & progress ---------- */
+.badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 20px; padding: 0 8px; border-radius: 10px;
+  font-size: var(--fs-sm); font-weight: 500; white-space: nowrap;
+}
+.badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.badge-run  { color: var(--st-run);  background: var(--st-run-bg); }
+.badge-ok   { color: var(--st-ok);   background: var(--st-ok-bg); }
+.badge-warn { color: var(--st-warn); background: var(--st-warn-bg); }
+.badge-hold { color: var(--st-hold); background: var(--st-hold-bg); }
+.badge-idle { color: var(--st-idle); background: var(--st-idle-bg); }
+
+.progress { display: flex; align-items: center; gap: var(--s2); min-width: 120px; }
+.progress-track { flex: 1; height: 6px; background: var(--st-idle-bg); border-radius: 3px; overflow: hidden; }
+.progress-fill { height: 100%; background: var(--accent); border-radius: 3px; }
+.progress-fill.warn { background: var(--st-warn); }
+.progress-fill.hold { background: var(--st-hold); }
+.progress-text { font-size: var(--fs-sm); color: var(--ink-2); min-width: 36px; text-align: right; }
+
+/* ---------- 11. Legend ---------- */
+.legend { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s4); font-size: var(--fs-sm); color: var(--ink-2); }
+.legend-item { display: inline-flex; align-items: center; gap: 6px; }
+.legend-swatch { width: 10px; height: 10px; border-radius: 2px; }
+
+/* ---------- 12. Lot timeline (Gantt, 라이브러리 불필요) ---------- */
+.tl { display: grid; grid-template-columns: 150px 1fr; font-size: var(--fs-sm); }
+.tl-scale { display: grid; border-bottom: 1px solid var(--line); color: var(--ink-3); }
+.tl-scale span { padding: 4px 6px; border-left: 1px solid var(--line); }
+.tl-label { padding: 6px var(--s3) 6px 0; border-bottom: 1px solid var(--line); display: flex; align-items: center; }
+.tl-track { position: relative; border-bottom: 1px solid var(--line); height: 34px;
+  background-image: linear-gradient(to right, var(--line) 1px, transparent 1px);
+  background-size: var(--tl-col, 14.2857%) 100%; }
+.tl-seg {
+  position: absolute; top: 8px; height: 18px; border-radius: 3px;
+  font-size: 11px; line-height: 18px; padding: 0 6px; color: #fff;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+.tl-seg.run  { background: var(--st-run); }
+.tl-seg.ok   { background: var(--st-ok); }
+.tl-seg.warn { background: var(--st-warn); }
+.tl-seg.hold { background: var(--st-hold); }
+.tl-seg.plan { background: transparent; color: var(--ink-3); border: 1px dashed var(--line-strong); line-height: 16px; }
+.tl-now { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--st-hold); z-index: 2; }
+.tl-now.has-label::before { content: "now"; position: absolute; top: -18px; left: -12px; font-size: 10px; color: var(--st-hold); font-weight: 600; }
+
+/* ---------- 13. Heatmap (라이브러리 불필요) ---------- */
+.hm { display: grid; gap: 2px; font-size: var(--fs-xs); }
+.hm-head { color: var(--ink-3); text-align: center; padding-bottom: 2px; }
+.hm-row-label { color: var(--ink-2); padding-right: var(--s2); display: flex; align-items: center; white-space: nowrap; font-size: var(--fs-sm); }
+.hm-cell {
+  height: 26px; border-radius: 2px; display: flex; align-items: center; justify-content: center;
+  font-variant-numeric: tabular-nums; cursor: default;
+}
+.hm-cell:hover { outline: 2px solid var(--ink); outline-offset: -1px; }
+.hm-scale { display: flex; align-items: center; gap: 6px; font-size: var(--fs-xs); color: var(--ink-3); margin-top: var(--s3); }
+.hm-scale-bar { width: 140px; height: 8px; border-radius: 2px; background: linear-gradient(to right, #F6E3C4, #CFE5EC, #0E6E8C); }
+
+/* ---------- 14. States ---------- */
+.empty { padding: var(--s6) var(--s4); text-align: center; color: var(--ink-3); }
+.empty strong { display: block; color: var(--ink-2); font-size: var(--fs-md); margin-bottom: 4px; }
+.toast {
+  position: fixed; right: var(--s5); bottom: var(--s5); z-index: 50;
+  background: var(--ink); color: #fff; padding: 10px var(--s4); border-radius: var(--r);
+  font-size: var(--fs-base); opacity: 0; transform: translateY(8px); transition: .2s;
+}
+.toast.is-show { opacity: 1; transform: none; }
+
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+'''
+
+FILES['static/js/chart-theme.js'] = r'''/* ==========================================================================
+   FAB DASHBOARD DESIGN KIT — chart-theme.js
+   Chart.js 로드 "다음"에 불러올 것. v2 / v3 / v4 모두 대응.
+   색은 base.css 토큰을 읽어서 사용 → CSS만 바꾸면 차트 색도 같이 바뀜.
+   ========================================================================== */
+(function () {
+  if (typeof Chart === "undefined") { console.warn("[chart-theme] Chart.js가 먼저 로드되어야 합니다."); return; }
+
+  var css = getComputedStyle(document.documentElement);
+  var v = function (name) { return css.getPropertyValue(name).trim(); };
+
+  var T = {
+    font:   v("--font"),
+    ink:    v("--ink"),
+    ink2:   v("--ink-2"),
+    ink3:   v("--ink-3"),
+    line:   v("--line"),
+    series: ["--c1", "--c2", "--c3", "--c4", "--c5", "--c6"].map(v),
+    status: {
+      run:  v("--st-run"),  ok:   v("--st-ok"),
+      warn: v("--st-warn"), hold: v("--st-hold"), idle: v("--st-idle")
+    }
+  };
+  window.CHART_THEME = T;
+
+  var major = parseInt(String(Chart.version || "2").split(".")[0], 10);
+
+  if (major >= 3) {
+    var d = Chart.defaults;
+    d.font.family = T.font;
+    d.font.size = 12;
+    d.color = T.ink2;
+    d.borderColor = T.line;
+    d.maintainAspectRatio = false;
+    d.animation = { duration: 300 };
+
+    d.plugins.legend.position = "bottom";
+    d.plugins.legend.align = "start";
+    d.plugins.legend.labels.boxWidth = 10;
+    d.plugins.legend.labels.boxHeight = 10;
+    d.plugins.legend.labels.padding = 14;
+
+    var tt = d.plugins.tooltip;
+    tt.backgroundColor = T.ink;
+    tt.titleColor = "#fff";
+    tt.bodyColor = "#E7ECF1";
+    tt.padding = 10;
+    tt.cornerRadius = 4;
+    tt.displayColors = true;
+    tt.boxPadding = 4;
+    tt.titleFont = { weight: "600" };
+
+    d.elements.bar.borderRadius = 3;
+    d.elements.bar.borderSkipped = false;
+    d.elements.line.borderWidth = 2;
+    d.elements.line.tension = 0.25;
+    d.elements.point.radius = 0;
+    d.elements.point.hoverRadius = 4;
+    d.elements.arc.borderWidth = 2;
+    d.elements.arc.borderColor = "#fff";
+
+    // 축: 세로 그리드만 옅게, 축선 제거
+    ["category", "linear", "time", "logarithmic"].forEach(function (k) {
+      if (!Chart.defaults.scales || !Chart.defaults.scales[k]) return;
+      var s = Chart.defaults.scales[k];
+      s.grid = s.grid || {};
+      s.grid.color = T.line;
+      s.grid.drawBorder = false;           // v3
+      if (s.border) s.border.display = false; // v4
+      s.ticks = s.ticks || {};
+      s.ticks.color = T.ink3;
+    });
+    if (Chart.defaults.scales && Chart.defaults.scales.category) {
+      Chart.defaults.scales.category.grid.display = false;
+    }
+  } else {
+    // ---- Chart.js v2 ----
+    var g = Chart.defaults.global;
+    g.defaultFontFamily = T.font;
+    g.defaultFontSize = 12;
+    g.defaultFontColor = T.ink2;
+    g.maintainAspectRatio = false;
+    g.legend.position = "bottom";
+    g.legend.labels.boxWidth = 10;
+    g.tooltips.backgroundColor = T.ink;
+    g.tooltips.xPadding = 10; g.tooltips.yPadding = 10;
+    g.tooltips.cornerRadius = 4;
+    g.elements.line.tension = 0.25;
+    g.elements.point.radius = 0;
+    g.elements.arc.borderWidth = 2;
+    ["category", "linear"].forEach(function (k) {
+      var s = Chart.defaults.scale;
+      s.gridLines.color = T.line;
+      s.gridLines.drawBorder = false;
+      s.gridLines.zeroLineColor = T.line;
+      s.ticks.fontColor = T.ink3;
+    });
+  }
+
+  /* 헬퍼: 시리즈 색 / 상태 색 / 투명도 */
+  window.chartColor = function (i) { return T.series[i % T.series.length]; };
+  window.statusColor = function (key) { return T.status[key] || T.status.idle; };
+  window.alpha = function (hex, a) {
+    var h = hex.replace("#", "");
+    var r = parseInt(h.substr(0, 2), 16), g2 = parseInt(h.substr(2, 2), 16), b = parseInt(h.substr(4, 2), 16);
+    return "rgba(" + r + "," + g2 + "," + b + "," + a + ")";
+  };
+})();
+'''
+
+FILES['static/js/ui.js'] = r'''/* ==========================================================================
+   FAB DASHBOARD DESIGN KIT — ui.js  (의존성 없음)
+   UI.heatmap / UI.timeline / UI.inlineEdit / UI.sortable / UI.toast
+   ========================================================================== */
+window.UI = (function () {
+
+  /* ---------- toast ---------- */
+  function toast(msg) {
+    var el = document.querySelector(".toast");
+    if (!el) { el = document.createElement("div"); el.className = "toast"; document.body.appendChild(el); }
+    el.textContent = msg;
+    el.classList.add("is-show");
+    clearTimeout(el._t);
+    el._t = setTimeout(function () { el.classList.remove("is-show"); }, 2200);
+  }
+
+  /* ---------- heatmap ----------
+     UI.heatmap(el, { rows:[...], cols:[...], values:[[...]], min:0, max:100, fmt:v=>v+'%' })  */
+  function lerp(a, b, t) { return Math.round(a + (b - a) * t); }
+  function hex(c) { c = c.replace("#", ""); return [0, 2, 4].map(function (i) { return parseInt(c.substr(i, 2), 16); }); }
+  var STOPS = [hex("#F6E3C4"), hex("#CFE5EC"), hex("#0E6E8C")];
+  function scale(t) {
+    t = Math.max(0, Math.min(1, t));
+    var a = t < 0.5 ? STOPS[0] : STOPS[1], b = t < 0.5 ? STOPS[1] : STOPS[2], u = t < 0.5 ? t * 2 : (t - 0.5) * 2;
+    return [lerp(a[0], b[0], u), lerp(a[1], b[1], u), lerp(a[2], b[2], u)];
+  }
+  function heatmap(el, o) {
+    var min = o.min == null ? 0 : o.min, max = o.max == null ? 100 : o.max;
+    var fmt = o.fmt || function (v) { return v; };
+    el.classList.add("hm");
+    el.style.gridTemplateColumns = "auto repeat(" + o.cols.length + ", minmax(28px, 1fr))";
+    var html = "<div></div>" + o.cols.map(function (c) { return '<div class="hm-head">' + c + "</div>"; }).join("");
+    o.rows.forEach(function (r, i) {
+      html += '<div class="hm-row-label">' + r + "</div>";
+      o.values[i].forEach(function (val, j) {
+        if (val == null) { html += '<div class="hm-cell" style="background:var(--surface-2)"></div>'; return; }
+        var rgb = scale((val - min) / (max - min));
+        var dark = (rgb[0] * 0.299 + rgb[1] * 0.587 + rgb[2] * 0.114) < 140;
+        html += '<div class="hm-cell" title="' + r + " · " + o.cols[j] + ": " + fmt(val) +
+          '" style="background:rgb(' + rgb.join(",") + ");color:" + (dark ? "#fff" : "var(--ink-2)") + '">' +
+          (o.showValue === false ? "" : fmt(val)) + "</div>";
+      });
+    });
+    el.innerHTML = html;
+  }
+
+  /* ---------- lot timeline ----------
+     UI.timeline(el, { start:'2026-09-24', days:7, now:'2026-09-28T14:00',
+       lots:[{ id:'LOT', note:'', segs:[{from:'..', to:'..', label:'STEP', st:'ok|run|warn|hold|plan'}] }] }) */
+  function timeline(el, o) {
+    var start = new Date(o.start).getTime(), span = o.days * 864e5;
+    var pct = function (d) { return ((new Date(d).getTime() - start) / span) * 100; };
+    var scale = "";
+    for (var i = 0; i < o.days; i++) {
+      var d = new Date(start + i * 864e5);
+      scale += "<span>" + (d.getMonth() + 1) + "/" + d.getDate() + "</span>";
+    }
+    var html = '<div></div><div class="tl-scale" style="grid-template-columns:repeat(' + o.days + ',1fr)">' + scale + "</div>";
+    o.lots.forEach(function (lot, li) {
+      html += '<div class="tl-label"><span class="mono">' + lot.id + "</span></div>";
+      html += '<div class="tl-track" style="--tl-col:' + (100 / o.days) + '%">';
+      lot.segs.forEach(function (s) {
+        var l = Math.max(0, pct(s.from)), r = Math.min(100, pct(s.to));
+        if (r <= 0 || l >= 100) return;
+        html += '<div class="tl-seg ' + (s.st || "run") + '" style="left:' + l + "%;width:" + (r - l) +
+          '%" title="' + lot.id + " · " + s.label + '">' + s.label + "</div>";
+      });
+      if (o.now) html += '<div class="tl-now' + (li === 0 ? ' has-label' : '') + '" style="left:' + pct(o.now) + '%"></div>';
+      html += "</div>";
+    });
+    el.className = "tl";
+    el.innerHTML = html;
+  }
+
+  /* ---------- inline edit ----------
+     <span class="cell-edit" contenteditable data-id="LOT1" data-field="memo">...</span>
+     UI.inlineEdit(document, function(id, field, value){ return fetch(...) }) */
+  function inlineEdit(root, onSave) {
+    root.addEventListener("keydown", function (e) {
+      if (!e.target.classList.contains("cell-edit")) return;
+      if (e.key === "Enter") { e.preventDefault(); e.target.blur(); }
+      if (e.key === "Escape") { e.target.textContent = e.target.dataset.orig || ""; e.target.blur(); }
+    });
+    root.addEventListener("focusin", function (e) {
+      if (e.target.classList.contains("cell-edit")) e.target.dataset.orig = e.target.textContent;
+    });
+    root.addEventListener("focusout", function (e) {
+      var el = e.target;
+      if (!el.classList.contains("cell-edit")) return;
+      var val = el.textContent.trim();
+      if (val === el.dataset.orig) return;
+      Promise.resolve(onSave(el.dataset.id, el.dataset.field, val)).then(function () {
+        el.classList.add("is-saved");
+        setTimeout(function () { el.classList.remove("is-saved"); }, 1200);
+        toast("저장됨: " + el.dataset.id);
+      }).catch(function () {
+        el.textContent = el.dataset.orig;
+        toast("저장 실패 — 다시 시도하세요");
+      });
+    });
+  }
+
+  /* ---------- sortable table: th.sort 클릭 ---------- */
+  function sortable(table) {
+    table.querySelectorAll("th.sort").forEach(function (th, idx) {
+      var col = Array.prototype.indexOf.call(th.parentNode.children, th), asc = true;
+      th.addEventListener("click", function () {
+        var tb = table.tBodies[0], rows = Array.prototype.slice.call(tb.rows);
+        rows.sort(function (a, b) {
+          var x = a.cells[col].innerText.trim(), y = b.cells[col].innerText.trim();
+          var nx = parseFloat(x.replace(/[^0-9.\-]/g, "")), ny = parseFloat(y.replace(/[^0-9.\-]/g, ""));
+          var r = (!isNaN(nx) && !isNaN(ny)) ? nx - ny : x.localeCompare(y, "ko");
+          return asc ? r : -r;
+        });
+        asc = !asc;
+        rows.forEach(function (r) { tb.appendChild(r); });
+      });
+    });
+  }
+
+  return { toast: toast, heatmap: heatmap, timeline: timeline, inlineEdit: inlineEdit, sortable: sortable };
+})();
+'''
+
+for path, content in FILES.items():
+    d = os.path.dirname(path)
+    if d:
+        os.makedirs(d, exist_ok=True)
+    if os.path.exists(path) and not FORCE:
+        print("skip (exists):", path)
+        continue
+    with open(path, "w", encoding="utf-8") as fp:
+        fp.write(content.lstrip("\n") if content.startswith("\n") else content)
+    print("write:", path)
+os.makedirs("static/fonts", exist_ok=True)
+print("\n완료. static/fonts 와 static/js/chart.umd.min.js 를 채워 넣으세요.")

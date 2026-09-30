@@ -1,0 +1,67 @@
+{#-
+  Flask 공통 UI 키트 — 기본 레이아웃
+  모든 화면은 {% extends "kit/base.html" %} 로 시작하고 {% block content %} 안에만 작성한다.
+
+  render_template 에서 넘기는 값 (모두 선택):
+    kit_app_name   앱 이름                          예: "재고 관리"
+    kit_home       앱 이름 링크                      예: url_for("index")
+    kit_nav        메뉴 목록 (그룹 단위)
+                   [{"title": "모니터링", "links": [{"id": "lot", "label": "LOT 현황", "href": url_for("lot"), "count": 12}]}]
+    kit_active     현재 메뉴 id                      예: "lot"  → 해당 링크에 aria-current="page"
+    kit_title      페이지 제목 (브라우저 탭)          예: "LOT 현황"
+    kit_updated_at 데이터 기준 시각 (상단바)          예: "2026-09-30 14:00"
+    kit_user       사용자 이름 (상단바)
+  블록:
+    title    브라우저 탭 제목 (기본값 kit_title)
+    head     <meta> 추가 (CSRF 토큰 등). style 태그 추가 금지
+    content  본문
+    scripts  선택 부품 JS 로드 (static/kit/js/kit-optional/*.js)
+-#}
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{{ kit_title|default('화면') }}{% endblock %} · {{ kit_app_name|default('업무 시스템') }}</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="{{ url_for('static', filename='kit/css/kit.css') }}">
+  {% block head %}{% endblock %}
+</head>
+<body>
+<a class="skip-link" href="#kit-main">본문 바로가기</a>
+<div class="app">
+
+  <header class="topbar">
+    <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="kit-nav" data-kit-nav-toggle>메뉴</button>
+    <a class="topbar-brand" href="{{ kit_home|default(request.script_root ~ '/') }}"><span class="topbar-mark" aria-hidden="true"></span>{{ kit_app_name|default('업무 시스템') }}</a>
+    <div class="topbar-spacer"></div>
+    {% if kit_updated_at %}<div class="topbar-meta"><span class="caps">Data as of</span><strong>{{ kit_updated_at }}</strong></div>{% endif %}
+    {% if kit_user %}<div class="topbar-meta">{{ kit_user }}</div>{% endif %}
+  </header>
+
+  <nav class="sidenav" id="kit-nav" aria-label="주 메뉴">
+    {% for group in kit_nav|default([]) %}
+    <div class="nav-group">
+      {% if group.title %}<div class="nav-group-title caps">{{ group.title }}</div>{% endif %}
+      <ul class="nav-list">
+        {% for link in group.links %}
+        <li><a class="nav-link" href="{{ link.href }}"{% if link.id == kit_active %} aria-current="page"{% endif %}>
+          <span>{{ link.label }}</span>{% if link.count is defined and link.count is not none %}<span class="nav-count">{{ link.count }}</span>{% endif %}
+        </a></li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endfor %}
+  </nav>
+
+  <main class="main" id="kit-main" tabindex="-1">
+    {% block content %}{% endblock %}
+  </main>
+
+</div>
+<div class="toast-region" id="kit-toasts" aria-live="polite" aria-atomic="false"></div>
+
+<script src="{{ url_for('static', filename='kit/js/kit.js') }}"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

@@ -1,0 +1,116 @@
+{#-
+  Flask 공통 UI 키트 — 매크로
+  사용: {% import "kit/macros.html" as kit with context %}
+  값 검증(상태 5종, 진행률 0~100, JSON 이스케이프)이 필요한 부품은 반드시 이 매크로를 쓴다.
+-#}
+
+{%- set KIT_STATUSES = ["success", "warning", "danger", "info", "neutral"] -%}
+
+{#- 상태 배지. status: success|warning|danger|info|neutral (그 외 값은 neutral). text 는 필수 -#}
+{% macro badge(status, text) -%}
+<span class="badge badge-{{ status if status in KIT_STATUSES else 'neutral' }}">{{ text }}</span>
+{%- endmacro %}
+
+{#- 진행률 바. value 는 0~100 으로 잘라서 표시. status 는 상태 5종 중 하나 또는 생략(포인트 색) -#}
+{% macro progress(value, status="", label="진행률") -%}
+{%- set v = value|float(0) -%}
+{%- set v = [[v, 0]|max, 100]|min -%}
+<div class="progress">
+  <progress class="progress-bar{% if status in KIT_STATUSES %} {{ status }}{% endif %}" max="100" value="{{ '%.1f'|format(v) }}" aria-label="{{ label }}"></progress>
+  <span class="progress-text">{{ '%.0f'|format(v) }}%</span>
+</div>
+{%- endmacro %}
+
+{#- 집계 기준 표시. kind: "all"(전체 기준) | "filtered"(조회 결과 기준). 계산은 앱이 한다 -#}
+{% macro basis(kind, text=none) -%}
+{%- if kind == "filtered" -%}
+<span class="basis basis-filtered">{{ text or "조회 결과 기준" }}</span>
+{%- else -%}
+<span class="basis">{{ text or "전체 기준" }}</span>
+{%- endif -%}
+{%- endmacro %}
+
+{#- 빈 결과. reset_href 가 있으면 초기화 링크를 함께 표시 -#}
+{% macro empty(title, desc="", reset_href=none, reset_text="조건 초기화") -%}
+<div class="empty" role="status">
+  <strong class="empty-title">{{ title }}</strong>
+  {%- if desc %}<span>{{ desc }}</span>{% endif %}
+  {%- if reset_href %}<div class="empty-actions"><a class="btn btn-sm" href="{{ reset_href }}">{{ reset_text }}</a></div>{% endif %}
+</div>
+{%- endmacro %}
+
+{#- 로딩 / 오류 상태 -#}
+{% macro loading(text="불러오는 중입니다") -%}
+<div class="loading" role="status"><span class="spinner" aria-hidden="true"></span><span>{{ text }}</span></div>
+{%- endmacro %}
+
+{% macro error_state(title, desc="", retry_href=none) -%}
+<div class="error-state" role="alert">
+  <strong class="empty-title">{{ title }}</strong>
+  {%- if desc %}<span>{{ desc }}</span>{% endif %}
+  {%- if retry_href %}<div class="empty-actions"><a class="btn btn-sm" href="{{ retry_href }}">다시 시도</a></div>{% endif %}
+</div>
+{%- endmacro %}
+
+{#- select 옵션. items: ["A", "B"] 또는 [("값", "표시"), ...]. selected 와 같은 값에 selected 표시 -#}
+{% macro options(items, selected="", all_label="전체") -%}
+{%- if all_label is not none %}<option value="">{{ all_label }}</option>{% endif %}
+{%- for it in items %}
+{%- if it is string or it is number %}{% set val = it|string %}{% set lab = it %}{% else %}{% set val = it[0]|string %}{% set lab = it[1] %}{% endif %}
+<option value="{{ val }}"{% if val == (selected|string) %} selected{% endif %}>{{ lab }}</option>
+{%- endfor %}
+{%- endmacro %}
+
+{#- 페이지 번호. 현재 조회 조건(query string)을 유지한 링크를 만든다 -#}
+{% macro pagination(page, pages, param="page", label="페이지 이동") -%}
+{%- if pages > 1 -%}
+{%- set args = request.args.to_dict() -%}
+{%- set view_args = request.view_args or {} -%}
+{%- macro _href(n) -%}{%- set _ = args.update({param: n}) -%}{{ url_for(request.endpoint, **dict(view_args, **args)) }}{%- endmacro -%}
+<nav aria-label="{{ label }}">
+  <ul class="pager">
+    <li>{% if page > 1 %}<a class="pager-link" href="{{ _href(page - 1) }}">이전</a>{% else %}<span class="pager-link is-disabled" aria-disabled="true">이전</span>{% endif %}</li>
+    {%- set shown = [] -%}
+    {%- for n in range(1, pages + 1) -%}
+      {%- if n == 1 or n == pages or (n >= page - 2 and n <= page + 2) -%}
+        {%- if shown and n - shown[-1] > 1 %}<li class="pager-gap" aria-hidden="true">…</li>{% endif -%}
+        {%- set _ = shown.append(n) %}
+    <li>{% if n == page %}<span class="pager-link" aria-current="page">{{ n }}</span>{% else %}<a class="pager-link" href="{{ _href(n) }}">{{ n }}</a>{% endif %}</li>
+      {%- endif -%}
+    {%- endfor %}
+    <li>{% if page < pages %}<a class="pager-link" href="{{ _href(page + 1) }}">다음</a>{% else %}<span class="pager-link is-disabled" aria-disabled="true">다음</span>{% endif %}</li>
+  </ul>
+</nav>
+{%- endif -%}
+{%- endmacro %}
+
+{#- 차트 영역. spec 은 kit-chart.js 형식의 dict (templates/kit/samples/catalog.html 참고).
+    size: ""(240px) | "sm"(180px) | "lg"(320px). src 를 주면 spec 대신 URL에서 JSON을 받아 그린다 -#}
+{% macro chart(label, spec=none, size="", src=none) -%}
+<div class="chart-box{% if size in ['sm', 'lg'] %} is-{{ size }}{% endif %}" role="img" aria-label="{{ label }}" data-kit-chart{% if src %} data-kit-chart-src="{{ src }}"{% endif %}>
+  {%- if spec is not none %}<script type="application/json">{{ spec|tojson }}</script>{% endif -%}
+</div>
+{%- endmacro %}
+
+{#- 선택 부품(간트·히트맵)에 넘길 데이터. <script type="application/json"> 으로 안전하게 출력 -#}
+{% macro data(id, value) -%}
+<script type="application/json" id="{{ id }}">{{ value|tojson }}</script>
+{%- endmacro %}
+
+{#- 부품 JS 로드. 이름: chart, gantt, heatmap, edit, search. {% block scripts %} 안에서 호출 -#}
+{% macro scripts() -%}
+{%- for name in varargs %}
+{%- if name == "chart" %}
+<script src="{{ url_for('static', filename='kit/vendor/chart.umd.min.js') }}"></script>
+<script src="{{ url_for('static', filename='kit/js/kit-chart.js') }}"></script>
+{%- elif name == "gantt" %}
+<script src="{{ url_for('static', filename='kit/js/kit-optional/gantt.js') }}"></script>
+{%- elif name == "heatmap" %}
+<script src="{{ url_for('static', filename='kit/js/kit-optional/heatmap.js') }}"></script>
+{%- elif name == "edit" %}
+<script src="{{ url_for('static', filename='kit/js/kit-optional/inline-edit.js') }}"></script>
+{%- elif name == "search" %}
+<script src="{{ url_for('static', filename='kit/js/kit-optional/quick-search.js') }}"></script>
+{%- endif %}
+{%- endfor %}
+{%- endmacro %}

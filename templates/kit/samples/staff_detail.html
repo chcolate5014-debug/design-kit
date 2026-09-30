@@ -1,0 +1,196 @@
+{% extends "kit/base.html" %}
+{% import "kit/macros.html" as kit with context %}
+{#- 입력/상세형 샘플: 목록(빠른 검색 + 인라인 편집) | 상세(탭: 상세 정보 목록, 입력 폼, 이력 표) + 모달 입력 -#}
+
+{% block content %}
+<div class="stack">
+
+  <div class="page-head">
+    <div>
+      <span class="page-kicker caps">Form &amp; detail sample</span>
+      <h1 class="page-title">인력 현황</h1>
+      <p class="page-sub">더미 데이터 · 변경 내용은 데모 서버 메모리에만 저장되고 재시작하면 사라짐</p>
+    </div>
+  </div>
+
+  {% if saved == "1" %}<div data-kit-toast="저장했습니다." data-kit-toast-status="success" hidden></div>{% endif %}
+  {% if saved == "error" %}<div data-kit-toast="교육 이력을 저장하지 못했습니다. 모든 항목을 입력하세요." data-kit-toast-status="danger" hidden></div>{% endif %}
+
+  <div class="grid grid-2">
+
+    <section class="panel" aria-labelledby="t-staff">
+      <div class="panel-head">
+        <h2 class="panel-title" id="t-staff">인원 목록</h2>
+        <div class="quick-search">
+          <label class="sr-only" for="qs-staff">표 안에서 찾기</label>
+          <input class="input input-search" id="qs-staff" type="search" placeholder="이름, 소속, 비고로 찾기" autocomplete="off" data-kit-quick-search="staff-table">
+          <span class="quick-search-count" data-kit-quick-search-count="staff-table" role="status" aria-live="polite"></span>
+        </div>
+      </div>
+      <div class="panel-body flush">
+        <div class="table-wrap">
+          <table class="table" id="staff-table" data-kit-sort data-kit-edit-url="{{ url_for('api_staff_save') }}">
+            <thead><tr>
+              <th scope="col" data-sort="id">사번</th>
+              <th scope="col" data-sort="text">이름</th>
+              <th scope="col" data-sort="text">소속</th>
+              <th scope="col" data-sort="text">상태</th>
+              <th scope="col">비고</th>
+            </tr></thead>
+            <tbody>
+            {% for s in staff %}
+              <tr{% if s.id == person.id %} class="is-selected"{% endif %}>
+                <td class="mono">{{ s.id }}</td>
+                <td><a href="{{ url_for('staff', id=s.id) }}"{% if s.id == person.id %} aria-current="true"{% endif %}>{{ s.name }}</a></td>
+                <td>{{ s.team }}</td>
+                <td>{{ kit.badge(staff_status[s.status], s.status) }}</td>
+                <td><span data-kit-edit data-id="{{ s.id }}" data-field="note" data-label="{{ s.name }} 비고" data-placeholder="비고 추가">{{ s.note }}</span></td>
+              </tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="panel-foot">
+        <span>비고를 눌러 수정 · Enter 저장 · Esc 취소</span>
+        <span>'실패'가 들어간 값은 저장 실패를 시연</span>
+      </div>
+    </section>
+
+    <section class="panel" aria-labelledby="t-person">
+      <div class="panel-head">
+        <div class="cluster">
+          <h2 class="panel-title" id="t-person">{{ person.name }}</h2>
+          <span class="mono muted">{{ person.id }}</span>
+          {{ kit.badge(staff_status[person.status], person.status) }}
+        </div>
+        <button class="btn btn-sm" type="button" data-kit-modal-open="m-training">교육 이력 추가</button>
+      </div>
+      <div class="panel-body">
+        <div data-kit-tabs>
+          <div class="tabs">
+            <button class="tab" type="button" aria-controls="tab-info"{% if tab == 'info' %} aria-selected="true"{% endif %}>상세 정보</button>
+            <button class="tab" type="button" aria-controls="tab-edit"{% if tab == 'edit' %} aria-selected="true"{% endif %}>정보 수정</button>
+            <button class="tab" type="button" aria-controls="tab-training"{% if tab == 'training' %} aria-selected="true"{% endif %}>교육 이력 <span class="nav-count">{{ person.trainings|length }}</span></button>
+          </div>
+
+          <section class="tab-panel" id="tab-info">
+            <dl class="dl dl-2">
+              <dt>이름</dt><dd>{{ person.name }}</dd>
+              <dt>사번</dt><dd class="mono">{{ person.id }}</dd>
+              <dt>소속</dt><dd>{{ person.team }}</dd>
+              <dt>근무조</dt><dd>{{ person.shift }}</dd>
+              <dt>연락처</dt><dd>{{ person.phone }}</dd>
+              <dt>입사일</dt><dd>{{ person.joined }}</dd>
+              <dt>보유 자격</dt><dd>{{ person.certs }}개</dd>
+              <dt>비고</dt><dd>{{ person.note or '-' }}</dd>
+            </dl>
+          </section>
+
+          <section class="tab-panel" id="tab-edit">
+            {% if errors %}
+            <div class="alert alert-danger mb-4" role="alert">
+              <div class="alert-body">
+                <p class="alert-title">저장하지 못했습니다</p>
+                <p>표시된 항목 {{ errors|length }}개를 고친 뒤 다시 저장하세요.</p>
+              </div>
+            </div>
+            {% endif %}
+            <form method="post" action="{{ url_for('staff', id=person.id) }}" novalidate>
+              <div class="form-grid">
+                <div class="field">
+                  <label for="e-name">이름<span class="req" aria-hidden="true">*</span></label>
+                  <input class="input" id="e-name" name="name" value="{{ form.name }}" aria-required="true"
+                    {% if errors.name %}aria-invalid="true" aria-describedby="e-name-err"{% endif %}>
+                  {% if errors.name %}<p class="field-error" id="e-name-err">{{ errors.name }}</p>{% endif %}
+                </div>
+                <div class="field">
+                  <label for="e-team">소속<span class="req" aria-hidden="true">*</span></label>
+                  <select class="select" id="e-team" name="team" aria-required="true"
+                    {% if errors.team %}aria-invalid="true" aria-describedby="e-team-err"{% endif %}>{{ kit.options(teams, form.team, all_label="선택하세요") }}</select>
+                  {% if errors.team %}<p class="field-error" id="e-team-err">{{ errors.team }}</p>{% endif %}
+                </div>
+                <div class="field">
+                  <label for="e-shift">근무조</label>
+                  <select class="select" id="e-shift" name="shift">{{ kit.options(shifts, form.shift, all_label=none) }}</select>
+                </div>
+                <div class="field">
+                  <label for="e-phone">연락처<span class="req" aria-hidden="true">*</span></label>
+                  <input class="input" id="e-phone" name="phone" value="{{ form.phone }}" inputmode="tel" aria-required="true"
+                    aria-describedby="e-phone-hint{% if errors.phone %} e-phone-err{% endif %}"{% if errors.phone %} aria-invalid="true"{% endif %}>
+                  <p class="field-hint" id="e-phone-hint">예: 010-1234-5678</p>
+                  {% if errors.phone %}<p class="field-error" id="e-phone-err">{{ errors.phone }}</p>{% endif %}
+                </div>
+                <div class="field">
+                  <label for="e-joined">입사일<span class="req" aria-hidden="true">*</span></label>
+                  <input class="input" id="e-joined" name="joined" type="date" value="{{ form.joined }}" aria-required="true"
+                    {% if errors.joined %}aria-invalid="true" aria-describedby="e-joined-err"{% endif %}>
+                  {% if errors.joined %}<p class="field-error" id="e-joined-err">{{ errors.joined }}</p>{% endif %}
+                </div>
+                <div class="field field-full">
+                  <label for="e-note">비고</label>
+                  <textarea class="textarea" id="e-note" name="note" rows="3">{{ form.note }}</textarea>
+                </div>
+              </div>
+              <p class="field-hint mt-2"><span class="req" aria-hidden="true">*</span> 표시는 필수 항목</p>
+              <div class="form-actions">
+                <a class="btn btn-quiet" href="{{ url_for('staff', id=person.id) }}">취소</a>
+                <button class="btn btn-primary" type="submit">저장</button>
+              </div>
+            </form>
+          </section>
+
+          <section class="tab-panel" id="tab-training">
+            {% if person.trainings %}
+            <div class="table-wrap is-auto">
+              <table class="table table-dense">
+                <thead><tr><th scope="col">교육일</th><th scope="col">교육명</th><th scope="col" class="num">시간</th></tr></thead>
+                <tbody>
+                {% for t in person.trainings %}
+                  <tr><td>{{ t.date }}</td><td>{{ t.title }}</td><td class="num">{{ t.hours }}</td></tr>
+                {% endfor %}
+                </tbody>
+              </table>
+            </div>
+            {% else %}
+            {{ kit.empty("교육 이력이 없습니다", "오른쪽 위 '교육 이력 추가'로 등록하세요.") }}
+            {% endif %}
+          </section>
+        </div>
+      </div>
+    </section>
+
+  </div>
+</div>
+
+<dialog class="modal" id="m-training" aria-labelledby="m-training-title">
+  <form method="post" action="{{ url_for('staff_training', sid=person.id) }}">
+    <div class="modal-head">
+      <h2 class="modal-title" id="m-training-title">교육 이력 추가 · {{ person.name }}</h2>
+      <button class="btn btn-quiet btn-sm" type="button" data-kit-modal-close aria-label="닫기">닫기</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-grid">
+        <div class="field field-full">
+          <label for="t-title">교육명<span class="req" aria-hidden="true">*</span></label>
+          <input class="input" id="t-title" name="title" maxlength="40" required autofocus>
+        </div>
+        <div class="field">
+          <label for="t-date">교육일<span class="req" aria-hidden="true">*</span></label>
+          <input class="input" id="t-date" name="date" type="date" value="2026-09-30" required>
+        </div>
+        <div class="field">
+          <label for="t-hours">시간<span class="req" aria-hidden="true">*</span></label>
+          <input class="input" id="t-hours" name="hours" type="number" min="1" max="40" value="4" required>
+        </div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" type="button" data-kit-modal-close>취소</button>
+      <button class="btn btn-primary" type="submit">추가</button>
+    </div>
+  </form>
+</dialog>
+{% endblock %}
+
+{% block scripts %}{{ kit.scripts("edit", "search") }}{% endblock %}

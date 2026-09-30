@@ -1,0 +1,128 @@
+{% extends "kit/base.html" %}
+{% import "kit/macros.html" as kit with context %}
+{#- 목록형 샘플: 필터바(GET 서버 조회) → 요약 → 정렬 테이블 → 페이지 번호. 조회 결과가 없으면 빈 결과 -#}
+
+{% block content %}
+<div class="stack">
+
+  <div class="page-head">
+    <div>
+      <span class="page-kicker caps">List sample</span>
+      <h1 class="page-title">원부자재 재고</h1>
+      <p class="page-sub">더미 데이터 · 안전재고 대비 현재고와 유효기한을 함께 확인</p>
+    </div>
+    <div class="page-actions">
+      <a class="btn" href="{{ url_for('inventory_csv', **f) }}">CSV 내려받기</a>
+    </div>
+  </div>
+
+  {% if summary.short %}
+  <div class="alert alert-warning" data-kit-dismissible>
+    <div class="alert-body">
+      <p class="alert-title">안전재고 부족 {{ summary.short }}건</p>
+      <p>상태를 "부족"으로 조회해서 발주 대상을 확인하세요.</p>
+    </div>
+  </div>
+  {% endif %}
+
+  <form class="filterbar" method="get" action="{{ url_for('inventory') }}" role="search" aria-label="재고 조회 조건">
+    <div class="field">
+      <label for="f-category">분류</label>
+      <select class="select" id="f-category" name="category">{{ kit.options(categories, f.category) }}</select>
+    </div>
+    <div class="field">
+      <label for="f-warehouse">창고</label>
+      <select class="select" id="f-warehouse" name="warehouse">{{ kit.options(warehouses, f.warehouse) }}</select>
+    </div>
+    <div class="field">
+      <label for="f-status">재고 상태</label>
+      <select class="select" id="f-status" name="status">{{ kit.options(stock_status.keys()|list, f.status) }}</select>
+    </div>
+    <div class="field field-wide">
+      <label for="f-q">품목코드 · 품목명</label>
+      <input class="input input-search" id="f-q" name="q" type="search" value="{{ f.q }}" placeholder="예: RM-0012, EMC" autocomplete="off">
+    </div>
+    <div class="filterbar-actions">
+      <a class="btn btn-quiet" href="{{ url_for('inventory') }}">초기화</a>
+      <button class="btn btn-primary" type="submit">조회</button>
+    </div>
+    <p class="filterbar-result" role="status">
+      조회 결과 <strong>{{ summary.total }}</strong>건{% if filtered %} (전체 {{ summary.all_total }}건 중){% endif %}
+      {%- if pages > 1 %} · {{ page }}/{{ pages }}쪽{% endif %}
+    </p>
+  </form>
+
+  <section class="kpi-band" aria-label="재고 요약">
+    <div class="kpi-band-head">
+      <span class="caps">Summary</span>
+      {{ kit.basis("filtered" if filtered else "all") }}
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">품목 수</div>
+      <div class="kpi-value">{{ summary.total }}<span class="kpi-unit">건</span></div>
+    </div>
+    <div class="kpi" data-status="danger">
+      <div class="kpi-label">안전재고 부족</div>
+      <div class="kpi-value">{{ summary.short }}<span class="kpi-unit">건</span></div>
+    </div>
+    <div class="kpi" data-status="warning">
+      <div class="kpi-label">유효기간 임박 (20일 이내)</div>
+      <div class="kpi-value">{{ summary.expiring }}<span class="kpi-unit">건</span></div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-label">현재고 합계</div>
+      <div class="kpi-value">{{ '{:,}'.format(summary.qty) }}<span class="kpi-unit">ea</span></div>
+    </div>
+  </section>
+
+  <section class="panel" aria-labelledby="t-stock">
+    <div class="panel-head">
+      <h2 class="panel-title" id="t-stock">재고 목록</h2>
+      <span class="panel-note">정렬은 현재 쪽({{ page_size }}건 이내) 안에서만 적용</span>
+    </div>
+    <div class="panel-body flush">
+      <div class="table-wrap">
+        <table class="table" data-kit-sort>
+          <thead><tr>
+            <th scope="col" data-sort="id">품목코드</th>
+            <th scope="col" data-sort="text">품목명</th>
+            <th scope="col" data-sort="text">분류</th>
+            <th scope="col" data-sort="text">창고</th>
+            <th scope="col" class="num" data-sort="number">현재고</th>
+            <th scope="col" class="num" data-sort="number">안전재고</th>
+            <th scope="col" data-sort="number">충족률</th>
+            <th scope="col" data-sort="date">최근 입고일</th>
+            <th scope="col" data-sort="date">유효기한</th>
+            <th scope="col" data-sort="text">상태</th>
+          </tr></thead>
+          <tbody>
+          {% for r in rows %}
+            <tr>
+              <td class="mono">{{ r.code }}</td>
+              <td>{{ r.name }}</td>
+              <td>{{ r.category }}</td>
+              <td>{{ r.warehouse }}</td>
+              <td class="num">{{ '{:,}'.format(r.qty) }}</td>
+              <td class="num">{{ '{:,}'.format(r.safety) }}</td>
+              <td data-sort-value="{{ r.fill }}">{{ kit.progress(r.fill, stock_status[r.status], "안전재고 충족률") }}</td>
+              <td>{{ r.received }}</td>
+              <td>{{ r.expires }}</td>
+              <td>{{ kit.badge(stock_status[r.status], r.status) }}</td>
+            </tr>
+          {% else %}
+            <tr><td class="empty-cell" colspan="10">{{ kit.empty("조건에 맞는 품목이 없습니다", "품목코드 일부만 입력하거나 조건을 초기화해 보세요.", url_for('inventory')) }}</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    {% if pages > 1 %}
+    <div class="panel-foot">
+      <span>{{ (page - 1) * page_size + 1 }}–{{ [page * page_size, summary.total]|min }} / {{ summary.total }}건</span>
+      {{ kit.pagination(page, pages) }}
+    </div>
+    {% endif %}
+  </section>
+
+</div>
+{% endblock %}

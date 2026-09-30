@@ -1,0 +1,173 @@
+{% extends "kit/base.html" %}
+{% import "kit/macros.html" as kit with context %}
+{#- 대시보드형 샘플: 페이지 헤더 → 필터바 → KPI 띠 → 테이블 + 차트 → 선택 부품(간트·히트맵) -#}
+
+{% block content %}
+<div class="stack">
+
+  <div class="page-head">
+    <div>
+      <span class="page-kicker caps">Dashboard sample</span>
+      <h1 class="page-title">LOT 현황</h1>
+      <p class="page-sub">더미 데이터 · 전체 {{ total }}개 LOT · 목표일을 넘긴 LOT은 지연으로 표시</p>
+    </div>
+    <div class="page-actions">
+      <a class="btn" href="{{ url_for('lot_dashboard', **f) }}">새로고침</a>
+    </div>
+  </div>
+
+  <form class="filterbar" method="get" action="{{ url_for('lot_dashboard') }}" role="search" aria-label="LOT 조회 조건">
+    <div class="field">
+      <label for="f-product">제품</label>
+      <select class="select" id="f-product" name="product">{{ kit.options(products, f.product) }}</select>
+    </div>
+    <div class="field">
+      <label for="f-step">현재 Step</label>
+      <select class="select" id="f-step" name="step">{{ kit.options(steps, f.step) }}</select>
+    </div>
+    <div class="field">
+      <label for="f-status">상태</label>
+      <select class="select" id="f-status" name="status">{{ kit.options(statuses, f.status) }}</select>
+    </div>
+    <div class="field">
+      <label for="f-q">LOT ID</label>
+      <input class="input input-search mono" id="f-q" name="q" value="{{ f.q }}" placeholder="일부만 입력해도 검색" autocomplete="off">
+    </div>
+    <div class="filterbar-actions">
+      <a class="btn btn-quiet" href="{{ url_for('lot_dashboard') }}">초기화</a>
+      <button class="btn btn-primary" type="submit">조회</button>
+    </div>
+    <p class="filterbar-result" role="status">조회 결과 <strong>{{ rows|length }}</strong>건{% if filtered %} (전체 {{ total }}건 중){% endif %}</p>
+  </form>
+
+  <section class="kpi-band" aria-label="LOT 요약">
+    <div class="kpi-band-head">
+      <span class="caps">Summary</span>
+      {{ kit.basis("filtered" if filtered else "all") }}
+    </div>
+    <div class="kpi" data-status="info">
+      <div class="kpi-label">진행</div>
+      <div class="kpi-value">{{ count['진행'] }}<span class="kpi-unit">lot</span></div>
+      <div class="kpi-delta">Step 진행 중</div>
+    </div>
+    <div class="kpi" data-status="warning">
+      <div class="kpi-label">지연</div>
+      <div class="kpi-value">{{ count['지연'] }}<span class="kpi-unit">lot</span></div>
+      <div class="kpi-delta">목표일 초과</div>
+    </div>
+    <div class="kpi" data-status="danger">
+      <div class="kpi-label">HOLD</div>
+      <div class="kpi-value">{{ count['HOLD'] }}<span class="kpi-unit">lot</span></div>
+      <div class="kpi-delta">원인 확인 필요</div>
+    </div>
+    <div class="kpi" data-status="success">
+      <div class="kpi-label">완료</div>
+      <div class="kpi-value">{{ count['완료'] }}<span class="kpi-unit">lot</span></div>
+      <div class="kpi-delta up">출하 대기 포함</div>
+    </div>
+    <div class="kpi" data-status="neutral">
+      <div class="kpi-label">대기</div>
+      <div class="kpi-value">{{ count['대기'] }}<span class="kpi-unit">lot</span></div>
+      <div class="kpi-delta">투입 전</div>
+    </div>
+  </section>
+
+  <div class="grid grid-main">
+    <section class="panel" aria-labelledby="t-lots">
+      <div class="panel-head">
+        <h2 class="panel-title" id="t-lots">LOT 목록</h2>
+        <span class="panel-note">열 제목을 눌러 정렬</span>
+      </div>
+      <div class="panel-body flush">
+        <div class="table-wrap">
+          <table class="table" data-kit-sort>
+            <thead><tr>
+              <th scope="col" data-sort="id">LOT ID</th>
+              <th scope="col" data-sort="text">제품</th>
+              <th scope="col" data-sort="text">현재 Step</th>
+              <th scope="col" data-sort="text">상태</th>
+              <th scope="col" data-sort="number">진행률</th>
+              <th scope="col" class="num" data-sort="number">경과일</th>
+              <th scope="col" data-sort="date">목표일</th>
+              <th scope="col">메모</th>
+            </tr></thead>
+            <tbody>
+            {% for r in rows %}
+              <tr>
+                <td class="mono">{{ r.lot_id }}</td>
+                <td>{{ r.product }}</td>
+                <td>{{ r.step }}</td>
+                <td>{{ kit.badge(lot_status[r.status], r.status) }}</td>
+                <td data-sort-value="{{ r.progress }}">{{ kit.progress(r.progress, lot_status[r.status]) }}</td>
+                <td class="num">{{ r.days }}</td>
+                <td>{{ r.due }}</td>
+                <td>{{ r.memo }}</td>
+              </tr>
+            {% else %}
+              <tr><td class="empty-cell" colspan="8">{{ kit.empty("조건에 맞는 LOT이 없습니다", "조건을 줄이거나 초기화해 보세요.", url_for('lot_dashboard')) }}</td></tr>
+            {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <div class="stack">
+      <section class="panel" aria-labelledby="t-status">
+        <div class="panel-head">
+          <h2 class="panel-title" id="t-status">상태 분포</h2>
+          {{ kit.basis("filtered" if filtered else "all") }}
+        </div>
+        <div class="panel-body">{{ kit.chart("상태별 LOT 수", status_chart, size="sm") }}</div>
+      </section>
+      <section class="panel" aria-labelledby="t-wip">
+        <div class="panel-head">
+          <h2 class="panel-title" id="t-wip">Step별 재공</h2>
+          {{ kit.basis("filtered" if filtered else "all") }}
+        </div>
+        <div class="panel-body">{{ kit.chart("Step별 진행·지연·HOLD LOT 수", wip_chart) }}</div>
+      </section>
+    </div>
+  </div>
+
+  <section class="panel" aria-labelledby="t-gantt">
+    <div class="panel-head">
+      <h2 class="panel-title" id="t-gantt">LOT 타임라인 <span class="panel-note">조회 결과 상위 8개</span></h2>
+      <ul class="legend">
+        <li class="legend-item"><span class="legend-swatch success"></span>완료 Step</li>
+        <li class="legend-item"><span class="legend-swatch info"></span>진행</li>
+        <li class="legend-item"><span class="legend-swatch warning"></span>지연</li>
+        <li class="legend-item"><span class="legend-swatch danger"></span>HOLD</li>
+        <li class="legend-item"><span class="legend-swatch plan"></span>계획</li>
+      </ul>
+    </div>
+    <div class="panel-body">
+      <div data-kit-gantt="lot-gantt" aria-label="LOT별 Step 타임라인"></div>
+      {{ kit.data("lot-gantt", gantt) }}
+    </div>
+  </section>
+
+  <div class="grid grid-2">
+    <section class="panel" aria-labelledby="t-heat">
+      <div class="panel-head">
+        <h2 class="panel-title" id="t-heat">Step × 요일 자동화율</h2>
+        {{ kit.basis("all", "전체 기준 · 최근 7일") }}
+      </div>
+      <div class="panel-body">
+        <div data-kit-heatmap="auto-heat" aria-label="Step별 요일 자동화율"></div>
+        {{ kit.data("auto-heat", heat) }}
+      </div>
+    </section>
+    <section class="panel" aria-labelledby="t-trend">
+      <div class="panel-head">
+        <h2 class="panel-title" id="t-trend">자동화율 추이</h2>
+        {{ kit.basis("all", "전체 기준 · 주간") }}
+      </div>
+      <div class="panel-body">{{ kit.chart("주간 자동화율과 목표 90%", src=url_for('api_lot_trend')) }}</div>
+    </section>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}{{ kit.scripts("chart", "gantt", "heatmap") }}{% endblock %}
